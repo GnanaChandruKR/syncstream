@@ -18,6 +18,9 @@ ydl_opts = {
     'no_warnings': True,
     'extract_flat': False,
     'socket_timeout': 10
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'ios', 'web']
 }
 
 # Reliable public Piped proxy mirrors for datacenter-safe extraction
