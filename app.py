@@ -12,16 +12,9 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 ytmusic = YTMusic()
 
-# Public Cobalt API instances for audio extraction
-COBALT_INSTANCES = [
-    "https://api.cobalt.tools",
-    "https://cobalt-api.kwiatekm.tokyo",
-    "https://api.wuk.sh"
-]
-
-# Fallback yt-dlp configuration
+# Strict audio-only format preferences to prevent Chrome video-background throttling
 ydl_opts = {
-    'format': 'bestaudio/best/ba/b',
+    'format': 'bestaudio[ext=m4a]/bestaudio/best[ext=m4a]/bestaudio[acodec!=none]',
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
@@ -42,43 +35,17 @@ room_state = {
 }
 
 def resolve_audio_url(video_id):
-    """Fetches direct audio stream links via Cobalt API, falling back to yt-dlp."""
+    """Directly extracts audio-only stream via yt-dlp on residential IP."""
     target_url = f"https://www.youtube.com/watch?v={video_id}"
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "url": target_url,
-        "downloadMode": "audio",
-        "audioFormat": "mp3"
-    }
-
-    # 1. Primary: Cobalt API mirrors
-    for instance in COBALT_INSTANCES:
-        try:
-            resp = requests.post(instance, json=payload, headers=headers, timeout=8)
-            if resp.status_code == 200:
-                data = resp.json()
-                stream_url = data.get('url')
-                if stream_url:
-                    print(f"[SUCCESS] Audio extracted via Cobalt: {instance}")
-                    return stream_url
-        except Exception as e:
-            print(f"[DEBUG] Cobalt instance {instance} failed: {e}")
-            continue
-
-    # 2. Fallback: yt-dlp extraction
     try:
-        print("[DEBUG] Falling back to direct yt-dlp...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(target_url, download=False)
             url = info.get('url')
             if url:
+                print(f"[SUCCESS] Audio extracted: {info.get('title')}")
                 return url
     except Exception as e:
-        print(f"[ERROR] All extractors failed: {e}")
-
+        print(f"[ERROR] yt-dlp extraction failed: {e}")
     return None
 
 def fetch_radio_tracks(video_id):
@@ -190,7 +157,7 @@ def play_next_track():
 
     if room_state['queue']:
         track = room_state['queue'].pop(0)
-        emit('log_message', {'type': 'info', 'text': f"Resolving stream: {track['title']}..."}, broadcast=True)
+        emit('log_message', {'type': 'info', 'text': f"Resolving audio stream: {track['title']}..."}, broadcast=True)
         
         stream_url = resolve_audio_url(track['id'])
         if not stream_url:
