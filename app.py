@@ -12,8 +12,9 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 ytmusic = YTMusic()
 
+# Relaxed formats and client emulation to prevent "format is not available" errors on cloud IPs
 ydl_opts = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio/best/ba/b',
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
@@ -21,9 +22,11 @@ ydl_opts = {
     'extractor_args': {
         'youtube': {
             'player_client': ['android', 'ios', 'web']
+        }
+    }
 }
 
-# Reliable public Piped proxy mirrors for datacenter-safe extraction
+# Public Piped API mirrors used as primary datacenter proxies
 PIPED_INSTANCES = [
     "https://pipedapi.kavin.rocks",
     "https://api.piped.privacydev.net",
