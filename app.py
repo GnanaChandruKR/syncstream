@@ -12,7 +12,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 ytmusic = YTMusic()
 
-# Relaxed formats and client emulation to prevent "format is not available" errors on cloud IPs
+# Relaxed yt-dlp options with mobile client emulation as final fallback
 ydl_opts = {
     'format': 'bestaudio/best/ba/b',
     'quiet': True,
@@ -26,11 +26,13 @@ ydl_opts = {
     }
 }
 
-# Public Piped API mirrors used as primary datacenter proxies
-PIPED_INSTANCES = [
-    "https://pipedapi.kavin.rocks",
-    "https://api.piped.privacydev.net",
-    "https://piped-api.garudalinux.org"
+# Public Invidious and Piped mirrors to bypass datacenter IP bot walls
+STREAM_APIS = [
+    {"type": "invidious", "url": "https://inv.tux.pizza/api/v1/videos/"},
+    {"type": "invidious", "url": "https://invidious.nerdvpn.de/api/v1/videos/"},
+    {"type": "invidious", "url": "https://invidious.jing.rocks/api/v1/videos/"},
+    {"type": "piped", "url": "https://pipedapi.kavin.rocks/streams/"},
+    {"type": "piped", "url": "https://api.piped.privacydev.net/streams/"}
 ]
 
 room_state = {
@@ -42,34 +44,51 @@ room_state = {
 }
 
 def resolve_audio_url(video_id):
-    """Attempts extraction via public Piped API mirrors first, falling back to yt-dlp."""
-    # 1. Try public Piped proxy mirrors
-    for instance in PIPED_INSTANCES:
+    """Attempts stream resolution across public mirrors before falling back to yt-dlp."""
+    for api in STREAM_APIS:
         try:
-            resp = requests.get(f"{instance}/streams/{video_id}", timeout=6)
-            if resp.status_code == 200:
-                data = resp.json()
+            target = f"{api['url']}{video_id}"
+            resp = requests.get(target, timeout=5)
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+
+            if api['type'] == 'invidious':
+                formats = data.get('adaptiveFormats', [])
+                audio_streams = [f for f in formats if f.get('type', '').startswith('audio/')]
+                if audio_streams:
+                    best = sorted(audio_streams, key=lambda x: int(x.get('bitrate', 0)), reverse=True)[0]
+                    stream_url = best.get('url')
+                    if stream_url:
+                        print(f"[SUCCESS] Resolved via Invidious mirror: {api['url']}")
+                        return stream_url
+
+            elif api['type'] == 'piped':
                 audio_streams = data.get('audioStreams', [])
                 if audio_streams:
-                    best_audio = sorted(audio_streams, key=lambda s: s.get('bitrate', 0), reverse=True)[0]
-                    stream_url = best_audio.get('url')
+                    best = sorted(audio_streams, key=lambda x: x.get('bitrate', 0), reverse=True)[0]
+                    stream_url = best.get('url')
                     if stream_url:
-                        print(f"[SUCCESS] Resolved stream via {instance}")
+                        print(f"[SUCCESS] Resolved via Piped mirror: {api['url']}")
                         return stream_url
+
         except Exception as err:
-            print(f"[DEBUG] Piped instance {instance} failed: {err}")
+            print(f"[DEBUG] Proxy mirror {api['url']} unreachable: {err}")
             continue
 
-    # 2. Fallback to local yt-dlp
+    # Fallback to local yt-dlp if proxy mirrors fail
     try:
-        print("[DEBUG] Falling back to local yt-dlp...")
+        print("[DEBUG] Falling back to direct yt-dlp extraction...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             url = info.get('url')
-            return url
+            if url:
+                return url
     except Exception as e:
-        print(f"[ERROR] All extractors failed: {e}")
-        return None
+        print(f"[ERROR] yt-dlp fallback failed: {e}")
+
+    return None
 
 def fetch_radio_tracks(video_id):
     try:
