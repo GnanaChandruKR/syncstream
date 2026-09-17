@@ -12,24 +12,26 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 ytmusic = YTMusic()
 
-# Relaxed yt-dlp options with mobile client emulation as final fallback
+# Public Cobalt API instances for audio extraction
+COBALT_INSTANCES = [
+    "https://api.cobalt.tools",
+    "https://cobalt-api.kwiatekm.tokyo",
+    "https://api.wuk.sh"
+]
+
+# Fallback yt-dlp configuration
 ydl_opts = {
     'format': 'bestaudio/best/ba/b',
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
     'socket_timeout': 10,
-    'cookiefile': 'cookies.txt',  # Exact Python equivalent of --cookies cookies.txt
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'ios', 'web']
+        }
+    }
 }
-
-# Public Invidious and Piped mirrors to bypass datacenter IP bot walls
-STREAM_APIS = [
-    {"type": "invidious", "url": "https://inv.tux.pizza/api/v1/videos/"},
-    {"type": "invidious", "url": "https://invidious.nerdvpn.de/api/v1/videos/"},
-    {"type": "invidious", "url": "https://invidious.jing.rocks/api/v1/videos/"},
-    {"type": "piped", "url": "https://pipedapi.kavin.rocks/streams/"},
-    {"type": "piped", "url": "https://api.piped.privacydev.net/streams/"}
-]
 
 room_state = {
     "queue": [],
@@ -40,49 +42,42 @@ room_state = {
 }
 
 def resolve_audio_url(video_id):
-    """Attempts stream resolution across public mirrors before falling back to yt-dlp."""
-    for api in STREAM_APIS:
+    """Fetches direct audio stream links via Cobalt API, falling back to yt-dlp."""
+    target_url = f"https://www.youtube.com/watch?v={video_id}"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "url": target_url,
+        "downloadMode": "audio",
+        "audioFormat": "mp3"
+    }
+
+    # 1. Primary: Cobalt API mirrors
+    for instance in COBALT_INSTANCES:
         try:
-            target = f"{api['url']}{video_id}"
-            resp = requests.get(target, timeout=5)
-            if resp.status_code != 200:
-                continue
-
-            data = resp.json()
-
-            if api['type'] == 'invidious':
-                formats = data.get('adaptiveFormats', [])
-                audio_streams = [f for f in formats if f.get('type', '').startswith('audio/')]
-                if audio_streams:
-                    best = sorted(audio_streams, key=lambda x: int(x.get('bitrate', 0)), reverse=True)[0]
-                    stream_url = best.get('url')
-                    if stream_url:
-                        print(f"[SUCCESS] Resolved via Invidious mirror: {api['url']}")
-                        return stream_url
-
-            elif api['type'] == 'piped':
-                audio_streams = data.get('audioStreams', [])
-                if audio_streams:
-                    best = sorted(audio_streams, key=lambda x: x.get('bitrate', 0), reverse=True)[0]
-                    stream_url = best.get('url')
-                    if stream_url:
-                        print(f"[SUCCESS] Resolved via Piped mirror: {api['url']}")
-                        return stream_url
-
-        except Exception as err:
-            print(f"[DEBUG] Proxy mirror {api['url']} unreachable: {err}")
+            resp = requests.post(instance, json=payload, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                stream_url = data.get('url')
+                if stream_url:
+                    print(f"[SUCCESS] Audio extracted via Cobalt: {instance}")
+                    return stream_url
+        except Exception as e:
+            print(f"[DEBUG] Cobalt instance {instance} failed: {e}")
             continue
 
-    # Fallback to local yt-dlp if proxy mirrors fail
+    # 2. Fallback: yt-dlp extraction
     try:
-        print("[DEBUG] Falling back to direct yt-dlp extraction...")
+        print("[DEBUG] Falling back to direct yt-dlp...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            info = ydl.extract_info(target_url, download=False)
             url = info.get('url')
             if url:
                 return url
     except Exception as e:
-        print(f"[ERROR] yt-dlp fallback failed: {e}")
+        print(f"[ERROR] All extractors failed: {e}")
 
     return None
 
