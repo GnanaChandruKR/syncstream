@@ -3,487 +3,275 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SyncStream Studio</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <title>SyncStream</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
-        .lyrics-container::-webkit-scrollbar, .debug-console::-webkit-scrollbar { display: none; }
-        .lyrics-container, .debug-console { -ms-overflow-style: none; scrollbar-width: none; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: #0f172a; color: #f8fafc; padding: 1rem; max-width: 600px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; text-align: center; color: #38bdf8; }
+        .card { background: #1e293b; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2); }
+        .player-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+        #albumArt { width: 70px; height: 70px; border-radius: 8px; object-fit: cover; background: #334155; }
+        .track-details { overflow: hidden; }
+        #trackTitle { font-size: 1.1rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #trackArtist { font-size: 0.9rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .controls { display: flex; justify-content: center; gap: 1rem; align-items: center; margin-bottom: 0.5rem; }
+        button { background: #38bdf8; color: #0f172a; border: none; padding: 0.6rem 1.2rem; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
+        button:active { transform: scale(0.98); }
+        .search-box { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        input[type="text"] { flex: 1; padding: 0.6rem; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #fff; outline: none; }
+        .results, .queue { list-style: none; overflow-y: auto; max-height: 250px; }
+        .item { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem; border-bottom: 1px solid #334155; gap: 0.5rem; }
+        .item-info { flex: 1; overflow: hidden; }
+        .item-title { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .item-artist { font-size: 0.8rem; color: #94a3b8; }
+        .btn-add { background: #22c55e; color: #fff; padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+        #progress { width: 100%; margin: 0.5rem 0; accent-color: #38bdf8; }
+        #logs { font-family: monospace; font-size: 0.75rem; color: #94a3b8; height: 60px; overflow-y: auto; background: #020617; padding: 0.5rem; border-radius: 6px; }
     </style>
 </head>
-<body class="bg-gray-950 text-white min-h-screen flex flex-col items-center p-4 font-sans relative overflow-x-hidden selection:bg-indigo-500">
+<body>
+    <h1>SyncStream Player</h1>
 
-    <div id="ambientBackdrop" class="fixed inset-0 pointer-events-none opacity-30 blur-[100px] transition-all duration-1000 scale-125"></div>
-
-    <div class="w-full max-w-md flex flex-col gap-4 relative z-10">
-        
-        <!-- Top Bar -->
-        <div class="flex items-center justify-between py-1">
-            <h1 class="text-xl font-black tracking-tight text-white flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span> SyncStream
-            </h1>
-            <span id="connectionBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-medium">Connecting</span>
-        </div>
-
-        <audio id="audioEngine" preload="auto"></audio>
-
-        <!-- Player Card -->
-        <div class="bg-gray-900/80 backdrop-blur-xl border border-white/10 rounded-3xl p-5 flex flex-col gap-4 shadow-2xl">
-            <div class="flex items-center gap-4">
-                <img id="trackThumb" class="w-20 h-20 rounded-2xl object-cover bg-gray-800 shadow-xl" src="https://via.placeholder.com/80" alt="Art">
-                <div class="flex-1 min-w-0">
-                    <h3 id="trackTitle" class="text-base font-bold truncate">No track playing</h3>
-                    <p id="trackArtist" class="text-xs text-gray-400 truncate mt-0.5">Search or add to queue</p>
-                </div>
-            </div>
-
-            <!-- Scrubber -->
-            <div class="flex flex-col gap-1.5">
-                <input id="seekBar" type="range" min="0" max="100" value="0" 
-                       class="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-indigo-500">
-                <div class="flex justify-between text-[10px] text-gray-400 font-mono">
-                    <span id="currentTime">0:00</span>
-                    <span id="totalDuration">0:00</span>
-                </div>
-            </div>
-
-            <!-- Controls -->
-            <div class="flex items-center justify-center gap-6">
-                <button onclick="togglePlayPause()" id="playBtn" class="bg-white text-black hover:bg-gray-200 w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg transition shadow-lg">
-                    ▶
-                </button>
-                <button onclick="skipTrack()" class="bg-gray-800 hover:bg-gray-700 w-10 h-10 rounded-full flex items-center justify-center transition text-sm">
-                    ⏭
-                </button>
+    <div class="card">
+        <div class="player-header">
+            <img id="albumArt" src="https://via.placeholder.com/70x70.png?text=Sync" alt="Artwork">
+            <div class="track-details">
+                <div id="trackTitle">No track playing</div>
+                <div id="trackArtist">Queue a track below</div>
             </div>
         </div>
 
-        <!-- Synced Lyrics -->
-        <div class="bg-gray-900/60 backdrop-blur-md border border-white/10 rounded-2xl p-4 h-28 overflow-hidden flex flex-col">
-            <h2 class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1">Live Lyrics</h2>
-            <div id="lyricsContainer" class="lyrics-container flex-1 overflow-y-auto flex flex-col gap-2 pt-2 scroll-smooth text-center">
-                <p class="text-xs text-gray-500 italic">No lyrics active</p>
-            </div>
+        <input type="range" id="progress" value="0" min="0" max="100" step="1">
+
+        <div class="controls">
+            <button id="btnPlayPause">Play</button>
+            <button id="btnNext">Next ⏭</button>
         </div>
 
-        <!-- Search Bar -->
-        <div class="relative">
-            <input id="searchInput" type="text" placeholder="Search track, artist..." 
-                   onkeydown="if(event.key === 'Enter') executeSearch()"
-                   class="w-full bg-gray-900/80 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 transition">
-            <button onclick="executeSearch()" id="searchBtn" class="absolute right-2.5 top-2 bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-xl text-xs font-semibold transition">Search</button>
-        </div>
-
-        <!-- Search Results -->
-        <div id="searchResults" class="hidden flex-col gap-2 max-h-52 overflow-y-auto bg-gray-900 border border-white/10 rounded-2xl p-2 shadow-2xl"></div>
-
-        <!-- Shared Queue -->
-        <div class="bg-gray-900/80 backdrop-blur-xl border border-white/10 rounded-3xl p-5">
-            <div class="flex justify-between items-center mb-3">
-                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Shared Queue</h2>
-                <span class="text-[10px] text-gray-500">Drag to reorder</span>
-            </div>
-            <div id="queueList" class="flex flex-col gap-2 text-sm text-gray-400">
-                <p class="text-xs text-gray-600">Queue is empty.</p>
-            </div>
-        </div>
-
-        <!-- Live Diagnostics Console -->
-        <div class="bg-black/90 border border-red-500/20 rounded-2xl p-3 flex flex-col gap-1 mb-8 shadow-inner">
-            <div class="flex justify-between items-center border-b border-white/10 pb-1.5">
-                <span class="text-[10px] font-mono text-red-400 font-bold uppercase tracking-wider">Live System Console</span>
-                <button onclick="clearLogs()" class="text-[10px] text-gray-500 hover:text-gray-300 font-mono">Clear</button>
-            </div>
-            <div id="consoleLogs" class="debug-console max-h-28 overflow-y-auto font-mono text-[11px] flex flex-col gap-1 pt-1">
-                <p class="text-gray-600">[sys] Initializing diagnostic monitor...</p>
-            </div>
-        </div>
+        <!-- Strict HTML5 Audio element without any video wrappers -->
+        <audio id="audioPlayer" preload="auto" playsinline></audio>
     </div>
+
+    <div class="card">
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search song or artist...">
+            <button id="btnSearch">Search</button>
+        </div>
+        <ul id="searchResults" class="results"></ul>
+    </div>
+
+    <div class="card">
+        <h3>Queue</h3>
+        <ul id="queueList" class="queue"></ul>
+    </div>
+
+    <div id="logs">Waiting for connection...</div>
 
     <script>
         const socket = io();
-        const audio = document.getElementById('audioEngine');
-        const playBtn = document.getElementById('playBtn');
-        const seekBar = document.getElementById('seekBar');
-        const currentTimeEl = document.getElementById('currentTime');
-        const totalDurationEl = document.getElementById('totalDuration');
-        const ambientBackdrop = document.getElementById('ambientBackdrop');
-        const lyricsContainer = document.getElementById('lyricsContainer');
-        const consoleLogs = document.getElementById('consoleLogs');
+        const audio = document.getElementById('audioPlayer');
+        const btnPlayPause = document.getElementById('btnPlayPause');
+        const btnNext = document.getElementById('btnNext');
+        const progress = document.getElementById('progress');
+        const trackTitle = document.getElementById('trackTitle');
+        const trackArtist = document.getElementById('trackArtist');
+        const albumArt = document.getElementById('albumArt');
+        const searchInput = document.getElementById('searchInput');
+        const btnSearch = document.getElementById('btnSearch');
+        const searchResults = document.getElementById('searchResults');
+        const queueList = document.getElementById('queueList');
+        const logBox = document.getElementById('logs');
 
-        let currentQueue = [];
-        let parsedLyrics = [];
-        let isRemote = false;
+        let isSeeking = false;
+        let currentTrackData = null;
 
-        function logToScreen(msg, type = 'info') {
-            const row = document.createElement('p');
-            const time = new Date().toLocaleTimeString().split(' ')[0];
-            if (type === 'error') row.className = 'text-red-400';
-            else if (type === 'warn') row.className = 'text-yellow-400';
-            else if (type === 'success') row.className = 'text-emerald-400';
-            else row.className = 'text-gray-400';
-
-            row.innerText = `[${time}] ${msg}`;
-            consoleLogs.appendChild(row);
-            consoleLogs.scrollTop = consoleLogs.scrollHeight;
+        function log(msg) {
+            const row = document.createElement('div');
+            row.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logBox.appendChild(row);
+            logBox.scrollTop = logBox.scrollHeight;
         }
 
-        function clearLogs() {
-            consoleLogs.innerHTML = '';
-        }
-
-        window.onerror = function(message, source, lineno) {
-            logToScreen(`Uncaught JS: ${message} (L${lineno})`, 'error');
-            return false;
-        };
-
-        window.onunhandledrejection = function(event) {
-            logToScreen(`Promise Error: ${event.reason}`, 'error');
-        };
-
-        socket.on('connect', () => {
-            const badge = document.getElementById('connectionBadge');
-            badge.innerText = "Synced 🟢";
-            badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium";
-            logToScreen('WebSocket connected', 'success');
-        });
-
-        socket.on('disconnect', () => {
-            const badge = document.getElementById('connectionBadge');
-            badge.innerText = "Disconnected 🔴";
-            badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 font-medium";
-            logToScreen('WebSocket disconnected', 'warn');
-        });
-
-        socket.on('log_message', (data) => {
-            logToScreen(`[Server] ${data.text}`, data.type);
-        });
-
-        const queueListEl = document.getElementById('queueList');
-        Sortable.create(queueListEl, {
-            animation: 150,
-            handle: '.drag-handle',
-            onEnd: function (evt) {
-                const movedItem = currentQueue.splice(evt.oldIndex, 1)[0];
-                currentQueue.splice(evt.newIndex, 0, movedItem);
-                socket.emit('sync_event', { action: 'reorder_queue', queue: currentQueue });
-            }
-        });
-
-        function formatTime(secs) {
-            const min = Math.floor(secs / 60) || 0;
-            const sec = Math.floor(secs % 60) || 0;
-            return `${min}:${sec < 10 ? '0' : ''}${sec}`;
-        }
-
-        audio.addEventListener('timeupdate', () => {
-            if (!audio.duration) return;
-            seekBar.value = (audio.currentTime / audio.duration) * 100;
-            currentTimeEl.innerText = formatTime(audio.currentTime);
-            totalDurationEl.innerText = formatTime(audio.duration);
-            updateLyricsHighlight(audio.currentTime);
-        });
-
-        audio.addEventListener('error', () => {
-            const err = audio.error;
-            let msg = 'Unknown media error';
-            if (err) {
-                if (err.code === 1) msg = 'Audio fetching aborted';
-                else if (err.code === 2) msg = 'Network error downloading stream';
-                else if (err.code === 3) msg = 'Audio decoding failed';
-                else if (err.code === 4) msg = 'Stream format unplayable or expired';
-            }
-            logToScreen(`Audio Error: ${msg}`, 'error');
-        });
-
-        setInterval(() => {
-            if (!audio.paused && audio.duration) {
-                socket.emit('sync_event', { action: 'heartbeat', time: audio.currentTime });
-            }
-        }, 4000);
-
-        socket.on('drift_sync', (data) => {
-            const timeDiff = data.time - audio.currentTime;
-            if (Math.abs(timeDiff) > 1.5) {
-                audio.currentTime = data.time;
-                audio.playbackRate = 1.0;
-            } else if (timeDiff > 0.3) {
-                audio.playbackRate = 1.06;
-            } else if (timeDiff < -0.3) {
-                audio.playbackRate = 0.94;
-            } else {
-                audio.playbackRate = 1.0;
-            }
-        });
-
-        function togglePlayPause() {
-            if (!audio.src) {
-                logToScreen("No audio stream loaded to play.", "warn");
-                return;
-            }
-
-            if (audio.paused) {
-                const playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    playPromise.then(() => {
-                        socket.emit('sync_event', { action: 'play', time: audio.currentTime });
-                    }).catch(err => {
-                        logToScreen(`Play blocked: ${err.message}`, 'error');
-                    });
-                }
-            } else {
-                audio.pause();
-                socket.emit('sync_event', { action: 'pause', time: audio.currentTime });
-            }
-        }
-
-        audio.addEventListener('play', () => { playBtn.innerText = '⏸'; });
-        audio.addEventListener('pause', () => { playBtn.innerText = '▶'; });
-
-        seekBar.addEventListener('change', () => {
-            const targetTime = (seekBar.value / 100) * audio.duration;
-            audio.currentTime = targetTime;
-            socket.emit('sync_event', { action: 'seek', time: targetTime });
-        });
-
-        audio.addEventListener('ended', () => {
-            logToScreen('Track ended. Auto-advancing queue...', 'info');
-            socket.emit('next_track');
-        });
-
-        function skipTrack() {
-            logToScreen('Skipping track...', 'info');
-            socket.emit('next_track');
-        }
-
-        function removeTrack(index) {
-            socket.emit('sync_event', { action: 'remove_from_queue', index: index });
-        }
-
-        socket.on('sync_action', (data) => {
-            isRemote = true;
-            if (data.action === 'play') {
-                if (Math.abs(audio.currentTime - data.time) > 0.5) audio.currentTime = data.time;
-                audio.play().catch(e => logToScreen(`Auto-play blocked: ${e.message}`, 'warn'));
-            } else if (data.action === 'pause') {
-                audio.pause();
-            } else if (data.action === 'seek') {
-                audio.currentTime = data.time;
-            }
-            setTimeout(() => { isRemote = false; }, 400);
-        });
-
-        socket.on('track_change', (data) => {
-            loadStream(data.track, data.stream_url, 0, true);
-            currentQueue = data.queue;
-            renderQueue(data.queue);
-        });
-
-        socket.on('queue_updated', (data) => {
-            currentQueue = data.queue;
-            renderQueue(data.queue);
-        });
-
-        socket.on('init_state', (state) => {
-            currentQueue = state.queue;
-            if (state.current_track && state.stream_url) {
-                loadStream(state.current_track, state.stream_url, state.current_time, state.is_playing);
-            }
-            renderQueue(state.queue);
-        });
-
-        function loadStream(track, url, startTime = 0, autoplay = false) {
-            if (!url) {
-                logToScreen(`Error: Stream URL is empty for ${track.title}`, 'error');
-                return;
-            }
-
-            logToScreen(`Loading: ${track.title}`, 'info');
-            document.getElementById('trackTitle').innerText = track.title;
-            document.getElementById('trackArtist').innerText = track.artist;
-            document.getElementById('trackThumb').src = track.thumbnail || 'https://via.placeholder.com/80';
-
-            ambientBackdrop.style.backgroundImage = `url('${track.thumbnail}')`;
-            ambientBackdrop.style.backgroundSize = 'cover';
-
-            audio.pause();
-            audio.src = url;
-            audio.load();
-            audio.currentTime = startTime;
-
-            if (autoplay) {
-                const onCanPlay = () => {
-                    audio.removeEventListener('canplay', onCanPlay);
-                    const promise = audio.play();
-                    if (promise !== undefined) {
-                        promise.then(() => {
-                            logToScreen(`Autoplaying: ${track.title}`, 'success');
-                        }).catch(() => {
-                            logToScreen(`Autoplay blocked: Tap Play once to unlock audio context`, 'warn');
-                        });
-                    }
-                };
-                audio.addEventListener('canplay', onCanPlay);
-            }
-
-            fetchLyrics(track.title, track.artist);
-
+        // Setup native MediaSession for background audio & lock screen control
+        function updateMediaSession(track) {
             if ('mediaSession' in navigator) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: track.title,
                     artist: track.artist,
-                    artwork: [{ src: track.thumbnail, sizes: '512x512', type: 'image/jpeg' }]
+                    artwork: [
+                        { src: track.thumbnail || 'https://via.placeholder.com/512x512.png?text=Audio', sizes: '512x512', type: 'image/jpeg' }
+                    ]
                 });
-                navigator.mediaSession.setActionHandler('play', togglePlayPause);
-                navigator.mediaSession.setActionHandler('pause', togglePlayPause);
-                navigator.mediaSession.setActionHandler('nexttrack', skipTrack);
+
+                navigator.mediaSession.setActionHandler('play', () => {
+                    audio.play().then(() => {
+                        socket.emit('sync_event', { action: 'play', time: audio.currentTime });
+                        btnPlayPause.textContent = 'Pause';
+                    }).catch(e => log(`Play error: ${e.message}`));
+                });
+
+                navigator.mediaSession.setActionHandler('pause', () => {
+                    audio.pause();
+                    socket.emit('sync_event', { action: 'pause', time: audio.currentTime });
+                    btnPlayPause.textContent = 'Play';
+                });
+
+                navigator.mediaSession.setActionHandler('nexttrack', () => {
+                    socket.emit('next_track');
+                });
+
+                navigator.mediaSession.setActionHandler('seekto', (details) => {
+                    if (details.seekTime && audio.duration) {
+                        audio.currentTime = details.seekTime;
+                        socket.emit('sync_event', { action: 'seek', time: details.seekTime });
+                    }
+                });
             }
         }
 
-        function fetchLyrics(title, artist) {
-            lyricsContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Searching lyrics...</p>';
-            parsedLyrics = [];
+        // Socket IO Handlers
+        socket.on('connect', () => log('Connected to server.'));
+        socket.on('log_message', (data) => log(data.text));
 
-            const cleanTitle = title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
-            fetch(`https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(artist)}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.syncedLyrics) {
-                        parseLRC(data.syncedLyrics);
-                    } else if (data.plainLyrics) {
-                        lyricsContainer.innerHTML = `<p class="text-xs text-gray-400 whitespace-pre-line">${data.plainLyrics}</p>`;
-                    } else {
-                        lyricsContainer.innerHTML = '<p class="text-xs text-gray-600 italic">Lyrics not found</p>';
-                    }
-                })
-                .catch(() => {
-                    lyricsContainer.innerHTML = '<p class="text-xs text-gray-600 italic">Lyrics unavailable</p>';
-                });
-        }
-
-        function parseLRC(lrcText) {
-            const lines = lrcText.split('\n');
-            parsedLyrics = [];
-            lyricsContainer.innerHTML = '';
-
-            lines.forEach((line, index) => {
-                const match = line.match(/\[(\d{2}):(\d{2}\.\d{2,3})\](.*)/);
-                if (match) {
-                    const time = parseInt(match[1]) * 60 + parseFloat(match[2]);
-                    const text = match[3].trim();
-                    if (text) {
-                        parsedLyrics.push({ time, text, index });
-                        const p = document.createElement('p');
-                        p.id = `lyric-${index}`;
-                        p.className = "text-xs text-gray-500 transition-all duration-300 font-medium cursor-pointer";
-                        p.innerText = text;
-                        p.onclick = () => { audio.currentTime = time; socket.emit('sync_event', { action: 'seek', time }); };
-                        lyricsContainer.appendChild(p);
-                    }
-                }
-            });
-        }
-
-        function updateLyricsHighlight(currentTime) {
-            if (!parsedLyrics.length) return;
-            let activeIndex = -1;
-            for (let i = 0; i < parsedLyrics.length; i++) {
-                if (currentTime >= parsedLyrics[i].time) {
-                    activeIndex = parsedLyrics[i].index;
-                } else {
-                    break;
-                }
+        socket.on('init_state', (state) => {
+            renderQueue(state.queue);
+            if (state.current_track && state.stream_url) {
+                applyTrack(state.current_track, state.stream_url, state.current_time, state.is_playing);
             }
+        });
 
-            if (activeIndex !== -1) {
-                document.querySelectorAll('#lyricsContainer p').forEach(p => {
-                    p.className = "text-xs text-gray-500 transition-all duration-300 font-medium";
+        socket.on('track_change', (data) => {
+            renderQueue(data.queue);
+            applyTrack(data.track, data.stream_url, 0, true);
+        });
+
+        socket.on('sync_action', (data) => {
+            if (data.action === 'play') {
+                if (Math.abs(audio.currentTime - data.time) > 1.5) audio.currentTime = data.time;
+                audio.play().catch(e => log(`Autoplay blocked: ${e.message}`));
+                btnPlayPause.textContent = 'Pause';
+            } else if (data.action === 'pause') {
+                audio.pause();
+                btnPlayPause.textContent = 'Play';
+            } else if (data.action === 'seek') {
+                audio.currentTime = data.time;
+            }
+        });
+
+        socket.on('drift_sync', (data) => {
+            if (Math.abs(audio.currentTime - data.time) > 2.0) {
+                audio.currentTime = data.time;
+            }
+        });
+
+        socket.on('queue_updated', (data) => renderQueue(data.queue));
+        socket.on('queue_ended', () => {
+            trackTitle.textContent = "Queue ended";
+            trackArtist.textContent = "";
+            btnPlayPause.textContent = "Play";
+            audio.pause();
+            audio.src = "";
+        });
+
+        function applyTrack(track, url, startTime = 0, autoPlay = true) {
+            currentTrackData = track;
+            trackTitle.textContent = track.title;
+            trackArtist.textContent = track.artist;
+            if (track.thumbnail) albumArt.src = track.thumbnail;
+
+            audio.src = url;
+            audio.currentTime = startTime;
+
+            updateMediaSession(track);
+
+            if (autoPlay) {
+                audio.play().then(() => {
+                    btnPlayPause.textContent = 'Pause';
+                }).catch(err => {
+                    log('Tap Play to unlock audio.');
+                    btnPlayPause.textContent = 'Play';
                 });
-                const activeEl = document.getElementById(`lyric-${activeIndex}`);
-                if (activeEl) {
-                    activeEl.className = "text-sm text-indigo-400 font-bold scale-105 transition-all duration-300";
-                    activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
             }
         }
 
         function renderQueue(queue) {
-            queueListEl.innerHTML = '';
-            if (!queue || queue.length === 0) {
-                queueListEl.innerHTML = '<p class="text-xs text-gray-600">Queue is empty. Auto-recommendations active.</p>';
-                return;
-            }
-            queue.forEach((t, i) => {
-                const row = document.createElement('div');
-                row.className = "flex items-center justify-between text-xs py-2 px-3 bg-gray-800/40 rounded-xl border border-white/5 hover:bg-gray-800 transition select-none";
-                row.innerHTML = `
-                    <div class="flex items-center gap-2 min-w-0 pr-2">
-                        <span class="drag-handle cursor-grab text-gray-500 text-sm">⠿</span>
-                        <div class="truncate">
-                            <span class="font-medium text-white truncate">${t.title}</span>
-                            <span class="text-gray-500 text-[10px] block truncate">${t.artist}</span>
-                        </div>
+            queueList.innerHTML = '';
+            queue.forEach((t) => {
+                const li = document.createElement('li');
+                li.className = 'item';
+                li.innerHTML = `
+                    <div class="item-info">
+                        <div class="item-title">${t.title}</div>
+                        <div class="item-artist">${t.artist}</div>
                     </div>
-                    <button onclick="removeTrack(${i})" class="text-gray-500 hover:text-red-400 px-2 py-1 transition text-sm">✕</button>
                 `;
-                queueListEl.appendChild(row);
+                queueList.appendChild(li);
             });
         }
 
-        function executeSearch() {
-            const query = document.getElementById('searchInput').value.trim();
-            const btn = document.getElementById('searchBtn');
-            if (!query) return;
+        // Controls
+        btnPlayPause.addEventListener('click', () => {
+            if (audio.paused) {
+                audio.play().then(() => {
+                    socket.emit('sync_event', { action: 'play', time: audio.currentTime });
+                    btnPlayPause.textContent = 'Pause';
+                }).catch(e => log(`Play error: ${e.message}`));
+            } else {
+                audio.pause();
+                socket.emit('sync_event', { action: 'pause', time: audio.currentTime });
+                btnPlayPause.textContent = 'Play';
+            }
+        });
 
-            btn.innerText = '...';
-            logToScreen(`Searching: "${query}"`, 'info');
+        btnNext.addEventListener('click', () => socket.emit('next_track'));
 
-            fetch(`/api/search?q=${encodeURIComponent(query)}`)
-                .then(res => {
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return res.json();
-                })
-                .then(tracks => {
-                    btn.innerText = 'Search';
-                    const container = document.getElementById('searchResults');
-                    container.innerHTML = '';
+        audio.addEventListener('timeupdate', () => {
+            if (!isSeeking && audio.duration) {
+                progress.value = (audio.currentTime / audio.duration) * 100;
+            }
+        });
 
-                    if (!Array.isArray(tracks) || tracks.length === 0) {
-                        logToScreen('Search returned 0 results', 'warn');
-                        container.innerHTML = '<p class="text-xs text-gray-500 p-2 text-center">No songs found. Try another query.</p>';
-                        container.classList.remove('hidden');
-                        return;
-                    }
+        progress.addEventListener('input', () => { isSeeking = true; });
+        progress.addEventListener('change', () => {
+            if (audio.duration) {
+                const newTime = (progress.value / 100) * audio.duration;
+                audio.currentTime = newTime;
+                socket.emit('sync_event', { action: 'seek', time: newTime });
+            }
+            isSeeking = false;
+        });
 
-                    logToScreen(`Found ${tracks.length} results`, 'success');
-                    container.classList.remove('hidden');
+        audio.addEventListener('ended', () => socket.emit('next_track'));
 
-                    tracks.forEach(track => {
-                        const item = document.createElement('div');
-                        item.className = "flex items-center gap-3 p-2 hover:bg-gray-800 rounded-xl cursor-pointer transition";
-                        item.innerHTML = `
-                            <img src="${track.thumbnail || 'https://via.placeholder.com/36'}" class="w-9 h-9 rounded-lg object-cover">
-                            <div class="flex-1 min-w-0">
-                                <div class="text-xs font-semibold text-white truncate">${track.title}</div>
-                                <div class="text-[10px] text-gray-400 truncate">${track.artist}</div>
-                            </div>
-                            <span class="text-xs text-indigo-400 font-bold px-2 py-1 bg-indigo-500/10 rounded-lg">+ Add</span>
-                        `;
-                        item.onclick = () => {
-                            logToScreen(`Queueing: ${track.title}`, 'info');
-                            socket.emit('sync_event', { action: 'add_to_queue', track: track });
-                            container.classList.add('hidden');
-                            document.getElementById('searchInput').value = '';
-                        };
-                        container.appendChild(item);
+        // Search
+        btnSearch.addEventListener('click', async () => {
+            const q = searchInput.value.trim();
+            if (!q) return;
+            searchResults.innerHTML = '<li class="item">Searching...</li>';
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+                const tracks = await res.json();
+                searchResults.innerHTML = '';
+                tracks.forEach(track => {
+                    const li = document.createElement('li');
+                    li.className = 'item';
+                    li.innerHTML = `
+                        <div class="item-info">
+                            <div class="item-title">${track.title}</div>
+                            <div class="item-artist">${track.artist}</div>
+                        </div>
+                        <button class="btn-add">Add</button>
+                    `;
+                    li.querySelector('.btn-add').addEventListener('click', () => {
+                        socket.emit('sync_event', { action: 'add_to_queue', track });
                     });
-                })
-                .catch(err => {
-                    btn.innerText = 'Search';
-                    logToScreen(`Search error: ${err.message}`, 'error');
+                    searchResults.appendChild(li);
                 });
-        }
+            } catch (err) {
+                searchResults.innerHTML = `<li class="item">Search error: ${err.message}</li>`;
+            }
+        });
     </script>
 </body>
 </html>
