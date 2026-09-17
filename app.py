@@ -17,7 +17,7 @@ ydl_opts = {
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
-    'socket_timeout': 10
+    'socket_timeout': 10,
     'extractor_args': {
         'youtube': {
             'player_client': ['android', 'ios', 'web']
