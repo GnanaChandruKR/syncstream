@@ -1,6 +1,4 @@
-from gevent import monkey
-monkey.patch_all()
-
+import os
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from ytmusicapi import YTMusic
@@ -173,4 +171,5 @@ def play_next_track():
         emit('queue_ended', broadcast=True)
 
 if __name__ == '__main__':
+    port = int(ps.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
