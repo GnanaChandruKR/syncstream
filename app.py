@@ -16,6 +16,7 @@ ydl_opts = {
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
+    'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
     'socket_timeout': 10
 }
 
