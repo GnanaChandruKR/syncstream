@@ -1,7 +1,5 @@
 flask
 flask-socketio
-gevent
-gevent-websocket
-gunicorn
+simple-websocket
 ytmusicapi
 yt-dlp
