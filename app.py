@@ -19,11 +19,7 @@ ydl_opts = {
     'no_warnings': True,
     'extract_flat': False,
     'socket_timeout': 10,
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['android', 'ios', 'web']
-        }
-    }
+    'cookiefile': 'cookies.txt',  # Exact Python equivalent of --cookies cookies.txt
 }
 
 # Public Invidious and Piped mirrors to bypass datacenter IP bot walls
