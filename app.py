@@ -1,9 +1,10 @@
 import os
+import requests
+import traceback
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from ytmusicapi import YTMusic
 import yt_dlp
-import traceback
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'sync_secret'
@@ -16,9 +17,15 @@ ydl_opts = {
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
-    'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
     'socket_timeout': 10
 }
+
+# Reliable public Piped proxy mirrors for datacenter-safe extraction
+PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://api.piped.privacydev.net",
+    "https://piped-api.garudalinux.org"
+]
 
 room_state = {
     "queue": [],
@@ -29,13 +36,33 @@ room_state = {
 }
 
 def resolve_audio_url(video_id):
+    """Attempts extraction via public Piped API mirrors first, falling back to yt-dlp."""
+    # 1. Try public Piped proxy mirrors
+    for instance in PIPED_INSTANCES:
+        try:
+            resp = requests.get(f"{instance}/streams/{video_id}", timeout=6)
+            if resp.status_code == 200:
+                data = resp.json()
+                audio_streams = data.get('audioStreams', [])
+                if audio_streams:
+                    best_audio = sorted(audio_streams, key=lambda s: s.get('bitrate', 0), reverse=True)[0]
+                    stream_url = best_audio.get('url')
+                    if stream_url:
+                        print(f"[SUCCESS] Resolved stream via {instance}")
+                        return stream_url
+        except Exception as err:
+            print(f"[DEBUG] Piped instance {instance} failed: {err}")
+            continue
+
+    # 2. Fallback to local yt-dlp
     try:
+        print("[DEBUG] Falling back to local yt-dlp...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             url = info.get('url')
             return url
     except Exception as e:
-        print(f"[ERROR] yt-dlp failed: {e}")
+        print(f"[ERROR] All extractors failed: {e}")
         return None
 
 def fetch_radio_tracks(video_id):
@@ -122,7 +149,7 @@ def handle_sync(data):
     elif action == 'remove_from_queue':
         index = data.get('index')
         if 0 <= index < len(room_state['queue']):
-            room_state['queue'].pop(index)
+            removed = room_state['queue'].pop(index)
             emit('queue_updated', {'queue': room_state['queue']}, broadcast=True)
         return
     elif action == 'reorder_queue':
@@ -172,6 +199,5 @@ def play_next_track():
         emit('queue_ended', broadcast=True)
 
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
